@@ -1,0 +1,38 @@
+# Secret Environment Files (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+Backend/.env
+Frontend/.env
+
+# Node Dependencies
+node_modules/
+**/node_modules/
+
+# Local Storage & Uploads
+storage/
+**/storage/
+
+# User Screenshots / Unwanted Files
+1.png
+
+# Build Output & Caches
+dist/
+**/dist/
+build/
+**/build/
+.vite/
+**/ .vite/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

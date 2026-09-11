@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum RecordStatus {
+  active
+  archived
+}
+
+enum AuditAction {
+  record_create
+  record_update
+  record_delete
+  record_restore
+  password_reset
+}
+
+model User {
+  id                    String             @id @default(uuid()) @db.Uuid
+  name                  String
+  email                 String             @unique
+  password_hash         String
+  role                  Role               @default(USER)
+  failed_login_attempts Int                @default(0)
+  lockout_until         DateTime?
+  created_at            DateTime           @default(now())
+  updated_at            DateTime           @updatedAt
+  records               Record[]
+  otps                  PasswordResetOtp[]
+  audit_logs            AuditLog[]
+
+  @@map("users")
+}
+
+model Record {
+  id          String       @id @default(uuid()) @db.Uuid
+  owner_id    String       @db.Uuid
+  owner       User         @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  category    String?
+  status      RecordStatus @default(active)
+  is_deleted  Boolean      @default(false)
+  deleted_at  DateTime?
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @updatedAt
+  attachments Attachment[]
+
+  @@index([owner_id])
+  @@index([is_deleted])
+  @@index([category])
+  @@index([status])
+  @@map("records")
+}
+
+model Attachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  record_id    String   @db.Uuid
+  record       Record   @relation(fields: [record_id], references: [id], onDelete: Cascade)
+  file_name    String
+  storage_path String   @unique
+  file_size    Int
+  mime_type    String
+  uploaded_at  DateTime @default(now())
+
+  @@map("attachments")
+}
+
+model PasswordResetOtp {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  otp_hash   String
+  expires_at DateTime
+  attempts   Int      @default(0)
+  is_used    Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  @@index([user_id, expires_at])
+  @@map("password_reset_otps")
+}
+
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  user_id   String?     @db.Uuid
+  user      User?       @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  action    AuditAction
+  target_id String?
+  timestamp DateTime    @default(now())
+  metadata  Json?
+
+  @@map("audit_logs")
+}
