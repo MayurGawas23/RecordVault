@@ -149,29 +149,3 @@ The Frontend application will launch at **`http://localhost:3000`** (or `http://
 
 ---
 
-## 🔑 Default Credentials
-
-- **Admin Account**: `mayurgawas0025@gmail.com` / `Admin123!`
-- **Standard Officer**: `user@recordvault.internal` / `User1234!`
-- **Secondary User**: `john@gmail.com` / `User1234!`
-
----
-
-## 🧪 Testing & Quality Assurance
-
-### Run Backend Unit & Storage Adapter Tests
-```bash
-cd Backend
-npm test
-```
-*Executes Jest test suites covering `StorageFactory`, `LocalStorageAdapter`, `S3StorageAdapter` mocking, magic-byte validation, OTP rate-limiting, and Pino log redaction (16/16 tests passing).*
-
-### Run Frontend Component Tests
-```bash
-cd Frontend
-npm test
-```
-*Executes Vitest test suites covering `LockoutCountdown` live timers, `AttachmentDropzone`, segmented `OTPInputWidget`, and `PasswordInput` (10/10 tests passing).*
-
----
-
