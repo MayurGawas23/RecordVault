@@ -24,6 +24,11 @@ class EmailService {
 
     if (user && pass && user !== 'test@ethereal.email') {
       const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
+      
+      // On cloud hosts like Render where port 587 outbound TCP sockets are blocked,
+      // keep connection timeouts short (3s) so the API response returns immediately.
+      const timeoutMs = process.env.RENDER || process.env.NODE_ENV === 'production' ? 3000 : 10000;
+
       const transportConfig = {
         host: isGmail ? 'smtp.gmail.com' : host,
         port: port || 587,
@@ -31,9 +36,9 @@ class EmailService {
         requireTLS: true,
         auth: { user, pass },
         tls: { rejectUnauthorized: false },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000
+        connectionTimeout: timeoutMs,
+        greetingTimeout: timeoutMs,
+        socketTimeout: timeoutMs
       };
 
       this.transporter = nodemailer.createTransport(transportConfig);
@@ -93,7 +98,7 @@ class EmailService {
       } else {
         logger.warn({ data, status: res.status }, 'Brevo HTTPS API returned error response');
         if (res.status === 401) {
-          console.log('\n⚠️ BREVO 401 UNAUTHORIZED: Ensure BREVO_API_KEY is an API v3 key starting with "xkeysib-" generated at https://app.brevo.com/settings/keys/api and IP authorization is left empty/unrestricted.\n');
+          console.log('\n⚠️ BREVO 401 UNAUTHORIZED: Ensure BREVO_API_KEY is an API v3 key starting with "xkeysib-" generated at https://app.brevo.com/settings/keys/api and Authorized IP list is left empty.\n');
         }
       }
     } catch (err) {
@@ -120,9 +125,9 @@ class EmailService {
           user: brevoUser,
           pass: brevoPass
         },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000
+        connectionTimeout: 5000,
+        greetingTimeout: 5000,
+        socketTimeout: 5000
       });
 
       const info = await transporter.sendMail({
@@ -267,7 +272,7 @@ class EmailService {
   /**
    * Send an email with HTTPS APIs primary, Brevo Port 2525, SMTP fallback, and Terminal log
    */
-  async sendEmailWithRetry(to, subject, text, html, retries = 2) {
+  async sendEmailWithRetry(to, subject, text, html, retries = 1) {
     // 1. ALWAYS log to terminal output
     this._logToTerminal(to, subject, text);
 
@@ -301,7 +306,7 @@ class EmailService {
       return resendResult;
     }
 
-    // 7. Fallback to standard SMTP
+    // 7. Fallback to standard SMTP (keep timeout fast on cloud)
     this._initTransporter();
 
     if (!this.transporter) {
@@ -330,9 +335,9 @@ class EmailService {
         return info;
       } catch (err) {
         lastError = err;
-        logger.warn({ attempt, retries, err: err.message, to }, 'Real SMTP delivery attempt failed, retrying...');
+        logger.warn({ attempt, retries, err: err.message, to }, 'Real SMTP delivery attempt failed');
         if (attempt < retries) {
-          await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt - 1)));
+          await new Promise(res => setTimeout(res, 500));
         }
       }
     }
