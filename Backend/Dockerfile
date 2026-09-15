@@ -3,6 +3,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+RUN apk add --no-cache openssl
+
 # Copy package manifests
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -21,6 +23,8 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
+
+RUN apk add --no-cache openssl
 
 # Copy built dependencies and source code from builder
 COPY --from=builder /app ./
