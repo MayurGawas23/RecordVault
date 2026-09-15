@@ -23,6 +23,9 @@ const redactPaths = [
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
+  serializers: {
+    err: pino.stdSerializers.err
+  },
   redact: {
     paths: redactPaths,
     censor: '[REDACTED]'
