@@ -8,6 +8,13 @@ class EmailService {
     this._initTransporter();
   }
 
+  _extractEmailAddress(str) {
+    if (!str) return 'mayur.gawas4work@gmail.com';
+    const match = str.match(/<([^>]+)>/);
+    if (match) return match[1].trim();
+    return str.trim();
+  }
+
   _initTransporter() {
     require('dotenv').config({ override: true });
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
@@ -58,7 +65,8 @@ class EmailService {
     if (!rawKey) return null;
 
     const apiKey = rawKey.replace(/^["']|["']$/g, '').trim();
-    const senderEmail = process.env.SMTP_USER || 'mayur.gawas4work@gmail.com';
+    const rawSender = process.env.SMTP_USER || process.env.SMTP_FROM || 'mayur.gawas4work@gmail.com';
+    const senderEmail = this._extractEmailAddress(rawSender);
 
     try {
       const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -84,6 +92,9 @@ class EmailService {
         return { success: true, messageId: data.messageId, viaBrevo: true };
       } else {
         logger.warn({ data, status: res.status }, 'Brevo HTTPS API returned error response');
+        if (res.status === 401) {
+          console.log('\n⚠️ BREVO 401 UNAUTHORIZED: Ensure BREVO_API_KEY is an API v3 key starting with "xkeysib-" generated at https://app.brevo.com/settings/keys/api and IP authorization is left empty/unrestricted.\n');
+        }
       }
     } catch (err) {
       logger.error({ err: err.message }, 'Failed to connect to Brevo HTTPS API');
@@ -179,7 +190,7 @@ class EmailService {
     if (!rawKey) return null;
 
     const apiKey = rawKey.replace(/^["']|["']$/g, '').trim();
-    const senderEmail = process.env.SMTP_USER || 'mayur.gawas4work@gmail.com';
+    const senderEmail = this._extractEmailAddress(process.env.SMTP_USER || 'mayur.gawas4work@gmail.com');
 
     try {
       const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
