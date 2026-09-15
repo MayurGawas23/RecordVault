@@ -19,27 +19,20 @@ class EmailService {
 
     if (user && pass && user !== 'test@ethereal.email') {
       const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
-      const transportConfig = isGmail
-        ? {
-            service: 'gmail',
-            auth: { user, pass },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 20000
-          }
-        : {
-            host,
-            port,
-            secure,
-            auth: { user, pass },
-            tls: { rejectUnauthorized: false },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 20000
-          };
+      const transportConfig = {
+        host: isGmail ? 'smtp.gmail.com' : host,
+        port: port || 587,
+        secure: port === 465,
+        requireTLS: true,
+        auth: { user, pass },
+        tls: { rejectUnauthorized: false },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 25000
+      };
 
       this.transporter = nodemailer.createTransport(transportConfig);
-      logger.info({ host, port, user, isGmail }, 'SMTP transporter configured for real email delivery');
+      logger.info({ host: transportConfig.host, port: transportConfig.port, user }, 'SMTP transporter configured for real email delivery');
     } else {
       this.transporter = null;
       logger.info('No valid SMTP credentials provided in .env. Emails will log to Terminal fallback.');
