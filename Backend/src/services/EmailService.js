@@ -5,7 +5,6 @@ const logger = require('../config/Logger');
 class EmailService {
   constructor() {
     this.transporter = null;
-    this.from = process.env.SMTP_FROM || process.env.SMTP_USER || '"RecordVault Custody" <noreply@recordvault.internal>';
     this._initTransporter();
   }
 
@@ -26,16 +25,15 @@ class EmailService {
         requireTLS: true,
         auth: { user, pass },
         tls: { rejectUnauthorized: false },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 25000
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
       };
 
       this.transporter = nodemailer.createTransport(transportConfig);
-      logger.info({ host: transportConfig.host, port: transportConfig.port, user }, 'SMTP transporter configured for real email delivery');
+      logger.info({ host: transportConfig.host, port: transportConfig.port, user }, 'SMTP transporter configured');
     } else {
       this.transporter = null;
-      logger.info('No valid SMTP credentials provided in .env. Emails will log to Terminal fallback.');
     }
   }
 
@@ -54,17 +52,62 @@ class EmailService {
   }
 
   /**
-   * Send an email with retry logic and terminal fallback
+   * Send via Resend HTTPS REST API (Port 443 - Immune to Cloud Firewall Blocks)
+   */
+  async _sendViaResendApi(to, subject, text, html) {
+    const apiKey = process.env.RESEND_API_KEY ? process.env.RESEND_API_KEY.trim() : null;
+    if (!apiKey) return null;
+
+    const fromAddress = process.env.RESEND_FROM || process.env.SMTP_FROM || 'RecordVault <onboarding@resend.dev>';
+
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: [to],
+          subject: subject,
+          text: text,
+          html: html
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        logger.info({ to, subject, id: data.id }, 'Real email delivered successfully via Resend HTTPS API');
+        console.log(`✅ REAL EMAIL DELIVERED via Resend HTTPS API to ${to} (Message ID: ${data.id})\n`);
+        return { success: true, messageId: data.id, viaResend: true };
+      } else {
+        logger.warn({ data, status: res.status }, 'Resend HTTPS API returned error response');
+      }
+    } catch (err) {
+      logger.error({ err: err.message }, 'Failed to connect to Resend HTTPS API');
+    }
+    return null;
+  }
+
+  /**
+   * Send an email with HTTPS API primary, SMTP fallback, and Terminal log
    */
   async sendEmailWithRetry(to, subject, text, html, retries = 2) {
-    // 1. ALWAYS output email contents to terminal (Primary / Fallback)
+    // 1. ALWAYS log to terminal output
     this._logToTerminal(to, subject, text);
 
-    // Refresh transporter configuration from process.env
+    // 2. Try Resend HTTPS API first (Port 443 works 100% on Render/AWS without firewall blocks)
+    const resendResult = await this._sendViaResendApi(to, subject, text, html);
+    if (resendResult) {
+      return resendResult;
+    }
+
+    // 3. Fallback to SMTP
     this._initTransporter();
 
     if (!this.transporter) {
-      logger.info({ to, subject }, 'Sent email to Terminal fallback (SMTP credentials not configured)');
+      logger.info({ to, subject }, 'Sent email to Terminal log (No SMTP/Resend API credentials configured)');
       return { success: true, deliveredToTerminal: true };
     }
 
@@ -96,9 +139,9 @@ class EmailService {
       }
     }
 
-    console.log(`⚠️ SMTP delivery to [${to}] failed: ${lastError?.message || lastError}. Used Terminal fallback above.\n`);
-    logger.warn({ err: lastError, to, subject }, 'Real SMTP delivery failed. Fallback to terminal log completed successfully.');
-    return { success: true, deliveredToTerminal: true, smtpError: lastError?.message };
+    console.log(`⚠️ Real email delivery to [${to}] failed (${lastError?.message || lastError}). Outputted to Terminal log above.\n`);
+    logger.warn({ err: lastError, to, subject }, 'Real email delivery failed. Fallback to terminal log completed.');
+    return { success: true, deliveredToTerminal: true, error: lastError?.message };
   }
 
   /**
