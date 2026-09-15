@@ -11,39 +11,28 @@ class EmailService {
   _initTransporter() {
     require('dotenv').config({ override: true });
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-    const port = parseInt(process.env.SMTP_PORT || '465', 10);
+    const port = parseInt(process.env.SMTP_PORT || '587', 10);
     const user = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : null;
     const pass = process.env.SMTP_PASS ? process.env.SMTP_PASS.replace(/\s+/g, '') : null;
 
     if (user && pass && user !== 'test@ethereal.email') {
       const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
-      
-      const transportConfig = isGmail
-        ? {
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true, // Direct SSL
-            auth: { user, pass },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 15000
-          }
-        : {
-            host,
-            port,
-            secure: process.env.SMTP_SECURE === 'true' || port === 465,
-            auth: { user, pass },
-            tls: { rejectUnauthorized: false },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 15000
-          };
+      const transportConfig = {
+        host: isGmail ? 'smtp.gmail.com' : host,
+        port: port || 587,
+        secure: port === 465,
+        requireTLS: true,
+        auth: { user, pass },
+        tls: { rejectUnauthorized: false },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
+      };
 
       this.transporter = nodemailer.createTransport(transportConfig);
-      logger.info({ host: transportConfig.host, port: transportConfig.port, user }, 'SMTP transporter configured on Port 465 SSL');
+      logger.info({ host: transportConfig.host, port: transportConfig.port, user }, 'SMTP transporter configured');
     } else {
       this.transporter = null;
-      logger.info('No valid SMTP credentials provided in .env. Emails will log to Terminal fallback.');
     }
   }
 
@@ -62,21 +51,165 @@ class EmailService {
   }
 
   /**
-   * Send an email with SMTP retry logic and Terminal log fallback
+   * Send via Brevo (Sendinblue) HTTPS REST API (Port 443 - Sends to ANY email address)
+   */
+  async _sendViaBrevoApi(to, subject, text, html) {
+    const rawKey = process.env.BREVO_API_KEY ? process.env.BREVO_API_KEY.trim() : null;
+    if (!rawKey) return null;
+
+    const apiKey = rawKey.replace(/^["']|["']$/g, '').trim();
+    const senderEmail = process.env.SMTP_USER || 'mayur.gawas4work@gmail.com';
+
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': apiKey,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: 'RecordVault Security', email: senderEmail },
+          to: [{ email: to }],
+          subject: subject,
+          textContent: text,
+          htmlContent: html
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        logger.info({ to, subject, messageId: data.messageId }, 'Real email delivered successfully via Brevo HTTPS API');
+        console.log(`✅ REAL EMAIL DELIVERED via Brevo HTTPS API to ${to} (Message ID: ${data.messageId})\n`);
+        return { success: true, messageId: data.messageId, viaBrevo: true };
+      } else {
+        logger.warn({ data, status: res.status }, 'Brevo HTTPS API returned error response');
+        if (res.status === 401) {
+          console.log('\n⚠️ BREVO 401 UNAUTHORIZED: Ensure BREVO_API_KEY is an API v3 key starting with "xkeysib-" generated at https://app.brevo.com/settings/keys/api\n');
+        }
+      }
+    } catch (err) {
+      logger.error({ err: err.message }, 'Failed to connect to Brevo HTTPS API');
+    }
+    return null;
+  }
+
+  /**
+   * Send via SendGrid HTTPS REST API (Port 443)
+   */
+  async _sendViaSendGridApi(to, subject, text, html) {
+    const rawKey = process.env.SENDGRID_API_KEY ? process.env.SENDGRID_API_KEY.trim() : null;
+    if (!rawKey) return null;
+
+    const apiKey = rawKey.replace(/^["']|["']$/g, '').trim();
+    const senderEmail = process.env.SMTP_USER || 'mayur.gawas4work@gmail.com';
+
+    try {
+      const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: to }] }],
+          from: { email: senderEmail, name: 'RecordVault Security' },
+          subject: subject,
+          content: [
+            { type: 'text/plain', value: text },
+            { type: 'text/html', value: html }
+          ]
+        })
+      });
+
+      if (res.status === 202 || res.ok) {
+        logger.info({ to, subject }, 'Real email delivered successfully via SendGrid HTTPS API');
+        console.log(`✅ REAL EMAIL DELIVERED via SendGrid HTTPS API to ${to}\n`);
+        return { success: true, viaSendGrid: true };
+      } else {
+        const data = await res.json().catch(() => ({}));
+        logger.warn({ data, status: res.status }, 'SendGrid HTTPS API returned error response');
+      }
+    } catch (err) {
+      logger.error({ err: err.message }, 'Failed to connect to SendGrid HTTPS API');
+    }
+    return null;
+  }
+
+  /**
+   * Send via Resend HTTPS REST API (Port 443)
+   */
+  async _sendViaResendApi(to, subject, text, html) {
+    const rawKey = process.env.RESEND_API_KEY ? process.env.RESEND_API_KEY.trim() : null;
+    if (!rawKey) return null;
+
+    const apiKey = rawKey.replace(/^["']|["']$/g, '').trim();
+    const fromAddress = process.env.RESEND_FROM || process.env.SMTP_FROM || 'RecordVault <onboarding@resend.dev>';
+
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: [to],
+          subject: subject,
+          text: text,
+          html: html
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        logger.info({ to, subject, id: data.id }, 'Real email delivered successfully via Resend HTTPS API');
+        console.log(`✅ REAL EMAIL DELIVERED via Resend HTTPS API to ${to} (Message ID: ${data.id})\n`);
+        return { success: true, messageId: data.id, viaResend: true };
+      } else {
+        logger.warn({ data, status: res.status }, 'Resend HTTPS API returned error response');
+      }
+    } catch (err) {
+      logger.error({ err: err.message }, 'Failed to connect to Resend HTTPS API');
+    }
+    return null;
+  }
+
+  /**
+   * Send an email with HTTPS API primary, SMTP fallback, and Terminal log
    */
   async sendEmailWithRetry(to, subject, text, html, retries = 2) {
-    // 1. ALWAYS log email to terminal output (Primary / Fallback)
+    // 1. ALWAYS log to terminal output
     this._logToTerminal(to, subject, text);
 
-    // Refresh transporter configuration from process.env
+    // 2. Try Brevo HTTPS API (Sends to ANY email address over Port 443)
+    const brevoResult = await this._sendViaBrevoApi(to, subject, text, html);
+    if (brevoResult) {
+      return brevoResult;
+    }
+
+    // 3. Try SendGrid HTTPS API (Port 443)
+    const sendgridResult = await this._sendViaSendGridApi(to, subject, text, html);
+    if (sendgridResult) {
+      return sendgridResult;
+    }
+
+    // 4. Try Resend HTTPS API (Port 443)
+    const resendResult = await this._sendViaResendApi(to, subject, text, html);
+    if (resendResult) {
+      return resendResult;
+    }
+
+    // 5. Fallback to SMTP
     this._initTransporter();
 
     if (!this.transporter) {
-      logger.info({ to, subject }, 'Sent email to Terminal fallback (SMTP credentials not configured)');
+      logger.info({ to, subject }, 'Sent email to Terminal log (No HTTP API/SMTP credentials configured)');
       return { success: true, deliveredToTerminal: true };
     }
 
-    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER || '"RecordVault Security" <noreply@recordvault.internal>';
+    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER || '"RecordVault" <noreply@recordvault.internal>';
 
     let attempt = 0;
     let lastError = null;
@@ -92,7 +225,7 @@ class EmailService {
           html
         });
 
-        logger.info({ to, subject, messageId: info.messageId }, 'Real email delivered successfully via SMTP (Port 465 SSL)');
+        logger.info({ to, subject, messageId: info.messageId }, 'Real email delivered successfully via SMTP');
         console.log(`✅ REAL EMAIL DELIVERED via SMTP to ${to} (Message ID: ${info.messageId})\n`);
         return info;
       } catch (err) {
@@ -104,9 +237,9 @@ class EmailService {
       }
     }
 
-    console.log(`⚠️ SMTP delivery to [${to}] failed: ${lastError?.message || lastError}. Used Terminal fallback above.\n`);
-    logger.warn({ err: lastError, to, subject }, 'Real SMTP delivery failed. Fallback to terminal log completed successfully.');
-    return { success: true, deliveredToTerminal: true, smtpError: lastError?.message };
+    console.log(`⚠️ Real email delivery to [${to}] failed (${lastError?.message || lastError}). Outputted to Terminal log above.\n`);
+    logger.warn({ err: lastError, to, subject }, 'Real email delivery failed. Fallback to terminal log completed.');
+    return { success: true, deliveredToTerminal: true, error: lastError?.message };
   }
 
   /**
