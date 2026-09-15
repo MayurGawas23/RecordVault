@@ -10,6 +10,9 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+// Enable trust proxy for reverse proxies (Render, Vercel, AWS ALB, Nginx)
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cors({
   origin: process.env.CLIENT_ORIGIN || true,

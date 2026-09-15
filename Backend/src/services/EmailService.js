@@ -12,7 +12,6 @@ class EmailService {
     require('dotenv').config({ override: true });
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = parseInt(process.env.SMTP_PORT || '587', 10);
-    const secure = process.env.SMTP_SECURE === 'true' || port === 465;
     const user = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : null;
     const pass = process.env.SMTP_PASS ? process.env.SMTP_PASS.replace(/\s+/g, '') : null;
 
@@ -52,7 +51,46 @@ class EmailService {
   }
 
   /**
-   * Send via Resend HTTPS REST API (Port 443 - Immune to Cloud Firewall Blocks)
+   * Send via Brevo (Sendinblue) HTTPS REST API (Port 443 - Send to ANY recipient address)
+   */
+  async _sendViaBrevoApi(to, subject, text, html) {
+    const apiKey = process.env.BREVO_API_KEY ? process.env.BREVO_API_KEY.trim() : null;
+    if (!apiKey) return null;
+
+    const senderEmail = process.env.SMTP_USER || 'mayur.gawas4work@gmail.com';
+
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: 'RecordVault Security', email: senderEmail },
+          to: [{ email: to }],
+          subject: subject,
+          textContent: text,
+          htmlContent: html
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        logger.info({ to, subject, messageId: data.messageId }, 'Real email delivered successfully via Brevo HTTPS API');
+        console.log(`✅ REAL EMAIL DELIVERED via Brevo HTTPS API to ${to} (Message ID: ${data.messageId})\n`);
+        return { success: true, messageId: data.messageId, viaBrevo: true };
+      } else {
+        logger.warn({ data, status: res.status }, 'Brevo HTTPS API returned error response');
+      }
+    } catch (err) {
+      logger.error({ err: err.message }, 'Failed to connect to Brevo HTTPS API');
+    }
+    return null;
+  }
+
+  /**
+   * Send via Resend HTTPS REST API (Port 443 - Free for account owner recipient)
    */
   async _sendViaResendApi(to, subject, text, html) {
     const apiKey = process.env.RESEND_API_KEY ? process.env.RESEND_API_KEY.trim() : null;
@@ -97,17 +135,23 @@ class EmailService {
     // 1. ALWAYS log to terminal output
     this._logToTerminal(to, subject, text);
 
-    // 2. Try Resend HTTPS API first (Port 443 works 100% on Render/AWS without firewall blocks)
+    // 2. Try Brevo HTTPS API (Sends to ANY email address over Port 443)
+    const brevoResult = await this._sendViaBrevoApi(to, subject, text, html);
+    if (brevoResult) {
+      return brevoResult;
+    }
+
+    // 3. Try Resend HTTPS API (Port 443)
     const resendResult = await this._sendViaResendApi(to, subject, text, html);
     if (resendResult) {
       return resendResult;
     }
 
-    // 3. Fallback to SMTP
+    // 4. Fallback to SMTP
     this._initTransporter();
 
     if (!this.transporter) {
-      logger.info({ to, subject }, 'Sent email to Terminal log (No SMTP/Resend API credentials configured)');
+      logger.info({ to, subject }, 'Sent email to Terminal log (No HTTP API/SMTP credentials configured)');
       return { success: true, deliveredToTerminal: true };
     }
 
