@@ -9,9 +9,9 @@ Frontend/.env
 node_modules/
 **/node_modules/
 
-# Local Storage & Uploads
+# Local Storage Uploads (do NOT ignore Backend/src/storage source code!)
 storage/
-**/storage/
+Backend/storage/
 
 # User Screenshots / Unwanted Files
 1.png
