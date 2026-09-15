@@ -386,16 +386,33 @@ class RecordService {
     }
 
     const storageAdapter = storageFactory.getStorageAdapter();
-    const locationInfo = await storageAdapter.getUrl(attachment.storage_path, {
-      disposition,
-      fileName: attachment.file_name,
-      contentType: attachment.mime_type,
-      expiresIn: 300 // 5 minutes
-    });
+    let stream = null;
+    let filePath = null;
+    let url = null;
+
+    if (typeof storageAdapter.getStream === 'function') {
+      try {
+        stream = await storageAdapter.getStream(attachment.storage_path);
+      } catch (err) {
+        logger.warn({ err: err.message, key: attachment.storage_path }, 'Storage getStream failed, falling back to getUrl');
+      }
+    }
+
+    if (!stream) {
+      const locationInfo = await storageAdapter.getUrl(attachment.storage_path, {
+        disposition,
+        fileName: attachment.file_name,
+        contentType: attachment.mime_type,
+        expiresIn: 300
+      });
+      filePath = locationInfo.filePath || null;
+      url = locationInfo.url || null;
+    }
 
     return {
-      url: locationInfo.url || null,
-      filePath: locationInfo.filePath || null,
+      stream,
+      filePath,
+      url,
       fileName: attachment.file_name,
       mimeType: attachment.mime_type,
       fileSize: attachment.file_size

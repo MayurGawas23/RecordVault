@@ -60,6 +60,15 @@ class S3StorageAdapter extends StorageAdapter {
     return { url, filePath: null };
   }
 
+  async getStream(key) {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key
+    });
+    const response = await this.s3Client.send(command);
+    return response.Body;
+  }
+
   async delete(key) {
     try {
       const command = new DeleteObjectCommand({

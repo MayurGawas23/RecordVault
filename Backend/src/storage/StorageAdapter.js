@@ -24,6 +24,15 @@ class StorageAdapter {
   }
 
   /**
+   * Get readable stream for reading/streaming file content.
+   * @param {string} key - Unique storage key
+   * @returns {Promise<import('stream').Readable>}
+   */
+  async getStream(key) {
+    throw new Error('Method not implemented.');
+  }
+
+  /**
    * Get presigned upload URL for direct client-to-storage upload.
    * Returns null if driver does not use presigned client uploads.
    * @param {string} key - Unique storage key

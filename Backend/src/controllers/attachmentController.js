@@ -70,13 +70,16 @@ class AttachmentController {
         'attachment'
       );
 
-      if (fileInfo.url) {
+      res.setHeader('Content-Type', fileInfo.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileInfo.fileName)}"`);
+
+      if (fileInfo.stream) {
+        return fileInfo.stream.pipe(res);
+      } else if (fileInfo.filePath) {
+        return res.sendFile(fileInfo.filePath);
+      } else if (fileInfo.url) {
         return res.redirect(302, fileInfo.url);
       }
-
-      res.setHeader('Content-Type', fileInfo.mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileInfo.fileName)}"`);
-      res.sendFile(fileInfo.filePath);
     } catch (err) {
       next(err);
     }
@@ -92,13 +95,16 @@ class AttachmentController {
         'inline'
       );
 
-      if (fileInfo.url) {
+      res.setHeader('Content-Type', fileInfo.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileInfo.fileName)}"`);
+
+      if (fileInfo.stream) {
+        return fileInfo.stream.pipe(res);
+      } else if (fileInfo.filePath) {
+        return res.sendFile(fileInfo.filePath);
+      } else if (fileInfo.url) {
         return res.redirect(302, fileInfo.url);
       }
-
-      res.setHeader('Content-Type', fileInfo.mimeType);
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileInfo.fileName)}"`);
-      res.sendFile(fileInfo.filePath);
     } catch (err) {
       next(err);
     }

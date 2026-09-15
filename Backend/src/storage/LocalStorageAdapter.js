@@ -41,6 +41,11 @@ class LocalStorageAdapter extends StorageAdapter {
     }
   }
 
+  async getStream(key) {
+    const filePath = path.join(this.storageDir, key);
+    return require('fs').createReadStream(filePath);
+  }
+
   async getPresignedUploadUrl(key, mimeType, options = {}) {
     // Local storage does not use presigned client upload URLs
     return null;
