@@ -34,7 +34,8 @@ export const Login = () => {
         });
         setError(null);
       } else {
-        setError(errorMsg || 'Authentication failed. Please check credentials.');
+        const networkErr = err.message ? `Connection error (${err.message}). Verify backend URL & server status.` : null;
+        setError(errorMsg || networkErr || 'Authentication failed. Please check credentials.');
       }
     }
   };

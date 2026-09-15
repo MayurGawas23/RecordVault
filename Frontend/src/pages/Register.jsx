@@ -20,7 +20,9 @@ export const Register = () => {
       await register(name, email, password);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.error || 'Registration failed. Check server requirements.');
+      const serverErr = err.response?.data?.error || err.response?.data?.message;
+      const networkErr = err.message ? `Connection error (${err.message}). Verify backend URL & server status.` : null;
+      setError(serverErr || networkErr || 'Registration failed. Check server requirements.');
     }
   };
 
