@@ -1,43 +1,55 @@
 const logger = require('../config/Logger');
 
 function errorHandler(err, req, res, next) {
-  // Always log full error details (stack trace, message, route context) to Backend logs / Render terminal
+  const isCustomError = err && typeof err === 'object' && !err.stack;
+  
+  // Extract error attributes cleanly whether plain object or Error instance
+  const errMessage = err.message || err.error || 'An unexpected error occurred.';
+  const errCode = err.code || null;
+  const errStatus = err.statusCode || err.status || (res.statusCode !== 200 ? res.statusCode : 500);
+
+  // Log complete error context into Backend logs / Render terminal stdout
   logger.error({
     err: {
-      name: err.name,
-      message: err.message,
-      stack: err.stack,
-      code: err.code
+      name: err.name || 'APIError',
+      message: errMessage,
+      stack: err.stack || null,
+      code: errCode,
+      statusCode: errStatus
     },
     path: req.path,
     method: req.method,
     userId: req.user?.id || null,
     ip: req.ip
-  }, `API Error [${req.method} ${req.path}]: ${err.message || 'Unhandled server error'}`);
+  }, `API Error [${req.method} ${req.path}]: ${errMessage}`);
 
+  // Handle custom thrown errors (like { statusCode: 401, message: 'Invalid email or password.' })
   if (err.statusCode) {
     return res.status(err.statusCode).json({
-      error: err.message,
+      error: errMessage,
       remainingSeconds: err.remainingSeconds,
       lockoutUntil: err.lockoutUntil
     });
   }
 
-  // Multer file upload errors
-  if (err.code === 'LIMIT_FILE_SIZE') {
+  // Multer file size errors
+  if (errCode === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({ error: 'File exceeds maximum allowed upload size limit.' });
   }
 
-  // Database constraint errors
-  if (err.code && typeof err.code === 'string' && err.code.startsWith('P')) {
-    return res.status(400).json({ error: 'A database constraint violation occurred.' });
+  // Prisma Database Connection Error (P1001)
+  if (errCode === 'P1001') {
+    return res.status(503).json({ error: 'Database server is unreachable. Please verify database connection.' });
   }
 
-  const statusCode = res.statusCode !== 200 ? res.statusCode : 500;
+  // Prisma Unique Constraint Error (P2002)
+  if (errCode === 'P2002') {
+    return res.status(409).json({ error: 'A record with this unique value already exists.' });
+  }
 
-  // Return clean, user-friendly message to Frontend (never leak raw stack traces to client)
-  res.status(statusCode).json({
-    error: err.message && statusCode < 500 ? err.message : 'An unexpected error occurred. Please try again later.'
+  // Return operational error message or fallback
+  return res.status(errStatus).json({
+    error: errMessage
   });
 }
 
