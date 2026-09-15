@@ -51,7 +51,7 @@ class EmailService {
   }
 
   /**
-   * Send via Brevo (Sendinblue) HTTPS REST API (Port 443 - Sends to ANY email address)
+   * Send via Brevo (Sendinblue) HTTPS REST API (Port 443)
    */
   async _sendViaBrevoApi(to, subject, text, html) {
     const rawKey = process.env.BREVO_API_KEY ? process.env.BREVO_API_KEY.trim() : null;
@@ -84,12 +84,89 @@ class EmailService {
         return { success: true, messageId: data.messageId, viaBrevo: true };
       } else {
         logger.warn({ data, status: res.status }, 'Brevo HTTPS API returned error response');
-        if (res.status === 401) {
-          console.log('\n⚠️ BREVO 401 UNAUTHORIZED: Ensure BREVO_API_KEY is an API v3 key starting with "xkeysib-" generated at https://app.brevo.com/settings/keys/api\n');
-        }
       }
     } catch (err) {
       logger.error({ err: err.message }, 'Failed to connect to Brevo HTTPS API');
+    }
+    return null;
+  }
+
+  /**
+   * Send via Brevo SMTP Relay Port 2525 (Port 2525 is unblocked on Render)
+   */
+  async _sendViaBrevoSmtp(to, subject, text, html) {
+    const brevoPass = (process.env.BREVO_SMTP_PASS || process.env.BREVO_API_KEY || '').replace(/["'\s]/g, '');
+    const brevoUser = (process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '').trim();
+
+    if (!brevoPass || !brevoUser) return null;
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host: 'smtp-relay.brevo.com',
+        port: 2525,
+        secure: false,
+        auth: {
+          user: brevoUser,
+          pass: brevoPass
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
+      });
+
+      const info = await transporter.sendMail({
+        from: `RecordVault Security <${brevoUser}>`,
+        to,
+        subject,
+        text,
+        html
+      });
+
+      logger.info({ to, subject, messageId: info.messageId }, 'Real email delivered successfully via Brevo SMTP Port 2525');
+      console.log(`✅ REAL EMAIL DELIVERED via Brevo SMTP Port 2525 to ${to} (Message ID: ${info.messageId})\n`);
+      return info;
+    } catch (err) {
+      logger.warn({ err: err.message, to }, 'Brevo SMTP Port 2525 attempt failed');
+    }
+    return null;
+  }
+
+  /**
+   * Send via Mailtrap Sending HTTPS REST API (Port 443)
+   */
+  async _sendViaMailtrapApi(to, subject, text, html) {
+    const rawKey = process.env.MAILTRAP_TOKEN ? process.env.MAILTRAP_TOKEN.trim() : null;
+    if (!rawKey) return null;
+
+    const apiKey = rawKey.replace(/^["']|["']$/g, '').trim();
+    const fromAddress = process.env.MAILTRAP_FROM || 'hello@demomailtrap.com';
+
+    try {
+      const res = await fetch('https://send.api.mailtrap.io/api/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: { email: fromAddress, name: 'RecordVault Security' },
+          to: [{ email: to }],
+          subject: subject,
+          text: text,
+          html: html
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        logger.info({ to, subject, messageIds: data.message_ids }, 'Real email delivered successfully via Mailtrap HTTPS API');
+        console.log(`✅ REAL EMAIL DELIVERED via Mailtrap HTTPS API to ${to}\n`);
+        return { success: true, messageIds: data.message_ids, viaMailtrap: true };
+      } else {
+        logger.warn({ data, status: res.status }, 'Mailtrap HTTPS API returned error response');
+      }
+    } catch (err) {
+      logger.error({ err: err.message }, 'Failed to connect to Mailtrap HTTPS API');
     }
     return null;
   }
@@ -177,31 +254,43 @@ class EmailService {
   }
 
   /**
-   * Send an email with HTTPS API primary, SMTP fallback, and Terminal log
+   * Send an email with HTTPS APIs primary, Brevo Port 2525, SMTP fallback, and Terminal log
    */
   async sendEmailWithRetry(to, subject, text, html, retries = 2) {
     // 1. ALWAYS log to terminal output
     this._logToTerminal(to, subject, text);
 
-    // 2. Try Brevo HTTPS API (Sends to ANY email address over Port 443)
-    const brevoResult = await this._sendViaBrevoApi(to, subject, text, html);
-    if (brevoResult) {
-      return brevoResult;
+    // 2. Try Brevo HTTPS API (Port 443)
+    const brevoApiResult = await this._sendViaBrevoApi(to, subject, text, html);
+    if (brevoApiResult) {
+      return brevoApiResult;
     }
 
-    // 3. Try SendGrid HTTPS API (Port 443)
+    // 3. Try Brevo SMTP Relay Port 2525 (Unblocked on Render)
+    const brevoSmtpResult = await this._sendViaBrevoSmtp(to, subject, text, html);
+    if (brevoSmtpResult) {
+      return brevoSmtpResult;
+    }
+
+    // 4. Try Mailtrap HTTPS API (Port 443)
+    const mailtrapResult = await this._sendViaMailtrapApi(to, subject, text, html);
+    if (mailtrapResult) {
+      return mailtrapResult;
+    }
+
+    // 5. Try SendGrid HTTPS API (Port 443)
     const sendgridResult = await this._sendViaSendGridApi(to, subject, text, html);
     if (sendgridResult) {
       return sendgridResult;
     }
 
-    // 4. Try Resend HTTPS API (Port 443)
+    // 6. Try Resend HTTPS API (Port 443)
     const resendResult = await this._sendViaResendApi(to, subject, text, html);
     if (resendResult) {
       return resendResult;
     }
 
-    // 5. Fallback to SMTP
+    // 7. Fallback to standard SMTP
     this._initTransporter();
 
     if (!this.transporter) {
